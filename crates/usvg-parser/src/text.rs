@@ -105,9 +105,13 @@ pub(crate) fn convert(
     } else {
         String::new()
     };
+    #[cfg(feature = "class")]
+    let class = text_node.class().to_string();
 
     let text = Text {
         id,
+        #[cfg(feature = "class")]
+        class,
         transform: Transform::default(),
         rendering_mode,
         positions: pos_list,

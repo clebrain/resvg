@@ -584,9 +584,13 @@ pub(crate) fn convert_group(
         } else {
             String::new()
         };
+        #[cfg(feature = "class")]
+        let class = node.class().to_string();
 
         let g = parent.append_kind(NodeKind::Group(Group {
             id,
+            #[cfg(feature = "class")]
+            class,
             transform,
             opacity,
             blend_mode,
@@ -684,9 +688,13 @@ fn convert_path(
     } else {
         String::new()
     };
+    #[cfg(feature = "class")]
+    let class = node.element_id().to_string();
 
     parent.append_kind(NodeKind::Path(Path {
         id,
+        #[cfg(feature = "class")]
+        class,
         transform: Default::default(),
         visibility,
         fill,

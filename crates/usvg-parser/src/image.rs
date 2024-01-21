@@ -170,9 +170,13 @@ pub(crate) fn convert(node: SvgNode, state: &converter::State, parent: &mut Node
     } else {
         String::new()
     };
+    #[cfg(feature = "class")]
+    let class = node.class().to_string();
 
     parent.append_kind(NodeKind::Image(Image {
         id,
+        #[cfg(feature = "class")]
+        class,
         transform: Default::default(),
         visibility,
         view_box,

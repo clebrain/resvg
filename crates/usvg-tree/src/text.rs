@@ -312,6 +312,10 @@ pub struct Text {
     /// Can be empty.
     pub id: String,
 
+    /// Element's class names.
+    #[cfg(feature = "class")]
+    pub class: String,
+
     /// Element transform.
     pub transform: Transform,
 

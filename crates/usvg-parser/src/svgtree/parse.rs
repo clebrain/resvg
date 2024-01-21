@@ -320,12 +320,15 @@ fn append_attribute<'input>(
     value: roxmltree::StringStorage<'input>,
     doc: &mut Document<'input>,
 ) -> bool {
-    match aid {
-        // The `style` attribute will be split into attributes, so we don't need it.
-        AId::Style |
-        // No need to copy a `class` attribute since CSS were already resolved.
-        AId::Class => return false,
-        _ => {}
+    // The `style` attribute will be split into attributes, so we don't need it.
+    if let AId::Style = aid {
+        return false;
+    }
+
+    #[cfg(not(feature = "class"))]
+    // No need to copy a `class` attribute since CSS were already resolved.
+    if let AId::Class = aid {
+        return false;
     }
 
     // Ignore `xlink:href` on `tspan` (which was originally `tref` or `a`),

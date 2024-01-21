@@ -733,6 +733,17 @@ impl NodeKind {
         }
     }
 
+    /// Returns note's class names.
+    #[cfg(feature = "class")]
+    pub fn class(&self) -> &str {
+        match self {
+            NodeKind::Group(ref e) => e.class.as_str(),
+            NodeKind::Path(ref e) => e.class.as_str(),
+            NodeKind::Image(ref e) => e.class.as_str(),
+            NodeKind::Text(ref e) => e.class.as_str(),
+        }
+    }
+
     /// Returns node's transform.
     pub fn transform(&self) -> Transform {
         match self {
@@ -758,6 +769,10 @@ pub struct Group {
     /// Isn't automatically generated.
     /// Can be empty.
     pub id: String,
+
+    /// Element's class names.
+    #[cfg(feature = "class")]
+    pub class: String,
 
     /// Element transform.
     pub transform: Transform,
@@ -792,6 +807,8 @@ impl Default for Group {
     fn default() -> Self {
         Group {
             id: String::new(),
+            #[cfg(feature = "class")]
+            class: String::new(),
             transform: Transform::default(),
             opacity: Opacity::ONE,
             blend_mode: BlendMode::Normal,
@@ -844,6 +861,10 @@ pub struct Path {
     /// Can be empty.
     pub id: String,
 
+    /// Element's class names.
+    #[cfg(feature = "class")]
+    pub class: String,
+
     /// Element transform.
     pub transform: Transform,
 
@@ -892,6 +913,8 @@ impl Path {
     pub fn new(data: Rc<tiny_skia_path::Path>) -> Self {
         Path {
             id: String::new(),
+            #[cfg(feature = "class")]
+            class: String::new(),
             transform: Transform::default(),
             visibility: Visibility::Visible,
             fill: None,
@@ -939,6 +962,10 @@ pub struct Image {
     /// Isn't automatically generated.
     /// Can be empty.
     pub id: String,
+
+    /// Element's class names.
+    #[cfg(feature = "class")]
+    pub class: String,
 
     /// Element transform.
     pub transform: Transform,

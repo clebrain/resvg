@@ -1,6 +1,6 @@
 [package]
 name = "usvg-text-layout"
-version = "0.36.0"
+version = "0.36.0+class"
 authors = ["Yevhenii Reizner <razrfalcon@gmail.com>"]
 keywords = ["svg"]
 license = "MPL-2.0"
@@ -19,7 +19,7 @@ rustybuzz = "0.10"
 unicode-bidi = "0.3"
 unicode-script = "0.5"
 unicode-vo = "0.1"
-usvg-tree = { path = "../usvg-tree", version = "0.36.0" }
+usvg-tree = { path = "../usvg-tree", version = "0.36.0+class" }
 
 [features]
 default = ["system-fonts", "memmap-fonts"]
@@ -27,3 +27,4 @@ default = ["system-fonts", "memmap-fonts"]
 system-fonts = ["fontdb/fs", "fontdb/fontconfig"]
 # Enables font files memmaping for faster loading.
 memmap-fonts = ["fontdb/memmap"]
+class = ["usvg-tree/class"]

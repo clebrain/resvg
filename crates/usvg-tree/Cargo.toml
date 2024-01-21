@@ -1,6 +1,6 @@
 [package]
 name = "usvg-tree"
-version = "0.36.0"
+version = "0.36.0+class"
 authors = ["Yevhenii Reizner <razrfalcon@gmail.com>"]
 keywords = ["svg"]
 license = "MPL-2.0"
@@ -17,3 +17,6 @@ rctree = "0.5"
 strict-num = "0.1.1"
 svgtypes = "0.12"
 tiny-skia-path = "0.11.2"
+
+[features]
+class = []

@@ -268,6 +268,15 @@ impl<'a, 'input: 'a> SvgNode<'a, 'input> {
         self.attribute(AId::Id).unwrap_or("")
     }
 
+    /// Returns element's `class` attribute value.
+    ///
+    /// Returns an empty string otherwise.
+    #[cfg(feature = "class")]
+    #[inline]
+    pub fn class(&self) -> &'a str {
+        self.attribute(AId::Class).unwrap_or("")
+    }
+
     /// Returns an attribute value.
     pub fn attribute<T: FromValue<'a, 'input>>(&self, aid: AId) -> Option<T> {
         let value = self
