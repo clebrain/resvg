@@ -3,90 +3,62 @@
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
 use crate::render::TinySkiaPixmapMutExt;
-use crate::tree::{BBoxes, Node, Tree};
 
-pub enum ImageKind {
-    #[cfg(feature = "raster-images")]
-    Raster(tiny_skia::Pixmap),
-    Vector(Tree),
-}
-
-pub struct Image {
-    pub transform: tiny_skia::Transform,
-    pub view_box: usvg::ViewBox,
-    pub quality: tiny_skia::FilterQuality,
-    pub kind: ImageKind,
-}
-
-pub fn convert(image: &usvg::Image, children: &mut Vec<Node>) -> Option<BBoxes> {
-    let object_bbox = image.view_box.rect.to_rect();
-    let bboxes = BBoxes {
-        object: usvg::BBox::from(object_bbox),
-        transformed_object: usvg::BBox::from(object_bbox.transform(image.transform)?),
-        layer: usvg::BBox::from(object_bbox),
-    };
-
-    if image.visibility != usvg::Visibility::Visible {
-        return Some(bboxes);
-    }
-
-    let mut quality = tiny_skia::FilterQuality::Bicubic;
-    if image.rendering_mode == usvg::ImageRendering::OptimizeSpeed {
-        quality = tiny_skia::FilterQuality::Nearest;
-    }
-
-    let kind = match image.kind {
-        usvg::ImageKind::SVG(ref utree) => ImageKind::Vector(Tree::from_usvg(utree)),
-        #[cfg(feature = "raster-images")]
-        _ => ImageKind::Raster(raster_images::decode_raster(image)?),
-        #[cfg(not(feature = "raster-images"))]
-        _ => {
-            log::warn!("Images decoding was disabled by a build feature.");
-            return None;
-        }
-    };
-
-    children.push(Node::Image(Image {
-        transform: image.transform,
-        view_box: image.view_box,
-        quality,
-        kind,
-    }));
-
-    Some(bboxes)
-}
-
-pub fn render_image(
-    image: &Image,
+pub fn render(
+    image: &usvg::Image,
     transform: tiny_skia::Transform,
     pixmap: &mut tiny_skia::PixmapMut,
 ) {
-    match image.kind {
-        #[cfg(feature = "raster-images")]
-        ImageKind::Raster(ref raster) => {
-            raster_images::render_raster(image, raster, transform, pixmap);
+    if image.visibility() != usvg::Visibility::Visible {
+        return;
+    }
+
+    render_inner(
+        image.kind(),
+        image.view_box(),
+        transform,
+        image.rendering_mode(),
+        pixmap,
+    );
+}
+
+pub fn render_inner(
+    image_kind: &usvg::ImageKind,
+    view_box: usvg::ViewBox,
+    transform: tiny_skia::Transform,
+    #[allow(unused_variables)] rendering_mode: usvg::ImageRendering,
+    pixmap: &mut tiny_skia::PixmapMut,
+) {
+    match image_kind {
+        usvg::ImageKind::SVG(ref tree) => {
+            render_vector(tree, &view_box, transform, pixmap);
         }
-        ImageKind::Vector(ref rtree) => {
-            render_vector(image, rtree, transform, pixmap);
+        #[cfg(feature = "raster-images")]
+        _ => {
+            raster_images::render_raster(image_kind, view_box, transform, rendering_mode, pixmap);
+        }
+        #[cfg(not(feature = "raster-images"))]
+        _ => {
+            log::warn!("Images decoding was disabled by a build feature.");
         }
     }
 }
 
 fn render_vector(
-    image: &Image,
-    tree: &Tree,
+    tree: &usvg::Tree,
+    view_box: &usvg::ViewBox,
     transform: tiny_skia::Transform,
     pixmap: &mut tiny_skia::PixmapMut,
 ) -> Option<()> {
-    let img_size = tree.size.to_int_size();
-    let (ts, clip) = crate::geom::view_box_to_transform_with_clip(&image.view_box, img_size);
+    let img_size = tree.size().to_int_size();
+    let (ts, clip) = crate::geom::view_box_to_transform_with_clip(&view_box, img_size);
 
     let mut sub_pixmap = tiny_skia::Pixmap::new(pixmap.width(), pixmap.height()).unwrap();
 
     let source_transform = transform;
-    let transform = transform.pre_concat(image.transform).pre_concat(ts);
+    let transform = transform.pre_concat(ts);
 
-    tree.render(transform, &mut sub_pixmap.as_mut());
+    crate::render(tree, transform, &mut sub_pixmap.as_mut());
 
     let mask = if let Some(clip) = clip {
         pixmap.create_rect_mask(source_transform, clip.to_rect())
@@ -108,12 +80,11 @@ fn render_vector(
 
 #[cfg(feature = "raster-images")]
 mod raster_images {
-    use super::Image;
     use crate::render::TinySkiaPixmapMutExt;
-    use crate::tree::OptionLog;
+    use crate::OptionLog;
 
-    pub fn decode_raster(image: &usvg::Image) -> Option<tiny_skia::Pixmap> {
-        match image.kind {
+    fn decode_raster(image: &usvg::ImageKind) -> Option<tiny_skia::Pixmap> {
+        match image {
             usvg::ImageKind::SVG(_) => None,
             usvg::ImageKind::JPEG(ref data) => {
                 decode_jpeg(data).log_none(|| log::warn!("Failed to decode a JPEG image."))
@@ -208,13 +179,16 @@ mod raster_images {
     }
 
     pub(crate) fn render_raster(
-        image: &Image,
-        raster: &tiny_skia::Pixmap,
+        image: &usvg::ImageKind,
+        view_box: usvg::ViewBox,
         transform: tiny_skia::Transform,
+        rendering_mode: usvg::ImageRendering,
         pixmap: &mut tiny_skia::PixmapMut,
     ) -> Option<()> {
+        let raster = decode_raster(image)?;
+
         let img_size = tiny_skia::IntSize::from_wh(raster.width(), raster.height())?;
-        let rect = image_rect(&image.view_box, img_size);
+        let rect = image_rect(&view_box, img_size);
 
         let ts = tiny_skia::Transform::from_row(
             rect.width() / raster.width() as f32,
@@ -225,23 +199,27 @@ mod raster_images {
             rect.y(),
         );
 
+        let mut quality = tiny_skia::FilterQuality::Bicubic;
+        if rendering_mode == usvg::ImageRendering::OptimizeSpeed {
+            quality = tiny_skia::FilterQuality::Nearest;
+        }
+
         let pattern = tiny_skia::Pattern::new(
             raster.as_ref(),
             tiny_skia::SpreadMode::Pad,
-            image.quality,
+            quality,
             1.0,
             ts,
         );
         let mut paint = tiny_skia::Paint::default();
         paint.shader = pattern;
 
-        let mask = if image.view_box.aspect.slice {
-            pixmap.create_rect_mask(transform, image.view_box.rect.to_rect())
+        let mask = if view_box.aspect.slice {
+            pixmap.create_rect_mask(transform, view_box.rect.to_rect())
         } else {
             None
         };
 
-        let transform = transform.pre_concat(image.transform);
         pixmap.fill_rect(rect.to_rect(), &paint, transform, mask.as_ref());
 
         Some(())

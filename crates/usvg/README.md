@@ -8,7 +8,7 @@
 SVG is notoriously hard to parse. `usvg` presents a layer between an XML library and
 a potential SVG rendering library. It will parse an input SVG into a strongly-typed tree structure
 were all the elements, attributes, references and other SVG features are already resolved
-and presented in a simplest way possible.
+and presented in the simplest way possible.
 So a caller doesn't have to worry about most of the issues related to SVG parsing
 and can focus just on the rendering part.
 
@@ -34,7 +34,8 @@ and can focus just on the rendering part.
   text chunks and spans resolving
 - Markers will be converted into regular elements. No need to place them manually
 - All filters are supported. Including filter functions, like `filter="contrast(50%)"`
-- Recursive elements will be detected an removed
+- Recursive elements will be detected and removed
+- `objectBoundingBox` will be replaced with `userSpaceOnUse`
 
 ## Limitations
 
@@ -42,7 +43,6 @@ and can focus just on the rendering part.
 - CSS support is minimal
 - Only [static](http://www.w3.org/TR/SVG11/feature#SVG-static) SVG features,
   e.g. no `a`, `view`, `cursor`, `script`, no events and no animations
-- Text elements must be converted into paths before writing to SVG
 
 ## License
 

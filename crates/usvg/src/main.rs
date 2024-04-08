@@ -8,9 +8,6 @@ use std::path::PathBuf;
 use std::process;
 
 use pico_args::Arguments;
-use usvg::TreeWriting;
-use usvg_parser::TreeParsing;
-use usvg_text_layout::TreeTextToPath;
 
 const HELP: &str = "\
 usvg (micro SVG) is an SVG simplification tool.
@@ -91,6 +88,7 @@ OPTIONS:
                                     Refer to the explanation of the '--default-width'
                                     option. [values: 1..4294967295 (inclusive)] [default: 100]
 
+  --preserve-text                   Do not convert text into paths.
   --id-prefix                       Adds a prefix to each ID attribute
   --indent INDENT                   Sets the XML nodes indent
                                     [values: none, 0, 1, 2, 3, 4, tabs] [default: 4]
@@ -113,9 +111,9 @@ ARGS:
 struct Args {
     dpi: u32,
     languages: Vec<String>,
-    shape_rendering: usvg_tree::ShapeRendering,
-    text_rendering: usvg_tree::TextRendering,
-    image_rendering: usvg_tree::ImageRendering,
+    shape_rendering: usvg::ShapeRendering,
+    text_rendering: usvg::TextRendering,
+    image_rendering: usvg::ImageRendering,
     resources_dir: Option<PathBuf>,
 
     font_family: Option<String>,
@@ -128,6 +126,7 @@ struct Args {
     font_files: Vec<PathBuf>,
     font_dirs: Vec<PathBuf>,
     skip_system_fonts: bool,
+    preserve_text: bool,
     list_fonts: bool,
     default_width: u32,
     default_height: u32,
@@ -149,12 +148,12 @@ fn collect_args() -> Result<Args, pico_args::Error> {
 
     if input.contains(["-h", "--help"]) {
         print!("{}", HELP);
-        std::process::exit(0);
+        process::exit(0);
     }
 
     if input.contains(["-V", "--version"]) {
         println!("{}", env!("CARGO_PKG_VERSION"));
-        std::process::exit(0);
+        process::exit(0);
     }
 
     Ok(Args {
@@ -187,6 +186,7 @@ fn collect_args() -> Result<Args, pico_args::Error> {
         font_files: input.values_from_str("--use-font-file")?,
         font_dirs: input.values_from_str("--use-fonts-dir")?,
         skip_system_fonts: input.contains("--skip-system-fonts"),
+        preserve_text: input.contains("--preserve-text"),
         list_fonts: input.contains("--list-fonts"),
         default_width: input
             .opt_value_from_fn("--default-width", parse_length)?
@@ -310,7 +310,7 @@ fn main() {
 
     if let Err(e) = process(args) {
         eprintln!("Error: {}.", e.to_string());
-        std::process::exit(1);
+        process::exit(1);
     }
 }
 
@@ -336,7 +336,7 @@ fn process(args: Args) -> Result<(), String> {
         (svg_from, svg_to)
     };
 
-    let mut fontdb = usvg_text_layout::fontdb::Database::new();
+    let mut fontdb = usvg::fontdb::Database::new();
     if !args.skip_system_fonts {
         // TODO: only when needed
         fontdb.load_system_fonts();
@@ -364,7 +364,7 @@ fn process(args: Args) -> Result<(), String> {
 
     if args.list_fonts {
         for face in fontdb.faces() {
-            if let usvg_text_layout::fontdb::Source::File(ref path) = &face.source {
+            if let usvg::fontdb::Source::File(ref path) = &face.source {
                 let families: Vec<_> = face
                     .families
                     .iter()
@@ -399,7 +399,7 @@ fn process(args: Args) -> Result<(), String> {
         }
     };
 
-    let re_opt = usvg_parser::Options {
+    let re_opt = usvg::Options {
         resources_dir,
         dpi: args.dpi as f32,
         font_family: args
@@ -412,12 +412,9 @@ fn process(args: Args) -> Result<(), String> {
         shape_rendering: args.shape_rendering,
         text_rendering: args.text_rendering,
         image_rendering: args.image_rendering,
-        default_size: usvg_tree::Size::from_wh(
-            args.default_width as f32,
-            args.default_height as f32,
-        )
-        .unwrap(),
-        image_href_resolver: usvg_parser::ImageHrefResolver::default(),
+        default_size: usvg::Size::from_wh(args.default_width as f32, args.default_height as f32)
+            .unwrap(),
+        image_href_resolver: usvg::ImageHrefResolver::default(),
     };
 
     let input_svg = match in_svg {
@@ -425,18 +422,16 @@ fn process(args: Args) -> Result<(), String> {
         InputFrom::File(ref path) => std::fs::read(path).map_err(|e| e.to_string()),
     }?;
 
-    let mut tree = usvg_tree::Tree::from_data(&input_svg, &re_opt).map_err(|e| format!("{}", e))?;
-    tree.convert_text(&fontdb);
+    let tree = usvg::Tree::from_data(&input_svg, &re_opt, &fontdb).map_err(|e| format!("{}", e))?;
 
-    let xml_opt = usvg::XmlOptions {
+    let xml_opt = usvg::WriteOptions {
         id_prefix: args.id_prefix,
+        preserve_text: args.preserve_text,
         coordinates_precision: args.coordinates_precision.unwrap_or(8),
         transforms_precision: args.transforms_precision.unwrap_or(8),
-        writer_opts: xmlwriter::Options {
-            use_single_quote: false,
-            indent: args.indent,
-            attributes_indent: args.attrs_indent,
-        },
+        use_single_quote: false,
+        indent: args.indent,
+        attributes_indent: args.attrs_indent,
     };
 
     let s = tree.to_string(&xml_opt);
@@ -486,15 +481,14 @@ impl log::Log for SimpleLogger {
             };
 
             let line = record.line().unwrap_or(0);
+            let args = record.args();
 
             match record.level() {
-                log::Level::Error => eprintln!("Error (in {}:{}): {}", target, line, record.args()),
-                log::Level::Warn => {
-                    eprintln!("Warning (in {}:{}): {}", target, line, record.args())
-                }
-                log::Level::Info => eprintln!("Info (in {}:{}): {}", target, line, record.args()),
-                log::Level::Debug => eprintln!("Debug (in {}:{}): {}", target, line, record.args()),
-                log::Level::Trace => eprintln!("Trace (in {}:{}): {}", target, line, record.args()),
+                log::Level::Error => eprintln!("Error (in {}:{}): {}", target, line, args),
+                log::Level::Warn => eprintln!("Warning (in {}:{}): {}", target, line, args),
+                log::Level::Info => eprintln!("Info (in {}:{}): {}", target, line, args),
+                log::Level::Debug => eprintln!("Debug (in {}:{}): {}", target, line, args),
+                log::Level::Trace => eprintln!("Trace (in {}:{}): {}", target, line, args),
             }
         }
     }

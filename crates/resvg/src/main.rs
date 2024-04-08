@@ -6,7 +6,7 @@
 
 use std::path;
 
-use usvg::{fontdb, NodeExt, TreeParsing, TreeTextToPath};
+use usvg::fontdb;
 
 fn main() {
     if let Err(e) = process() {
@@ -22,11 +22,8 @@ where
     let now = std::time::Instant::now();
     let result = f();
     if perf {
-        println!(
-            "{}: {:.2}ms",
-            name,
-            now.elapsed().as_micros() as f64 / 1000.0
-        );
+        let elapsed = now.elapsed().as_micros() as f64 / 1000.0;
+        println!("{}: {:.2}ms", name, elapsed);
     }
 
     result
@@ -83,13 +80,14 @@ fn process() -> Result<(), String> {
             .map_err(|e| e.to_string())
     })?;
 
-    let mut tree = timed(args.perf, "SVG Parsing", || {
-        usvg::Tree::from_xmltree(&xml_tree, &args.usvg).map_err(|e| e.to_string())
-    })?;
-
     // fontdb initialization is pretty expensive, so perform it only when needed.
-    if tree.has_text_nodes() {
-        let fontdb = timed(args.perf, "FontDB", || load_fonts(&mut args));
+    let has_text_nodes = xml_tree
+        .descendants()
+        .any(|n| n.has_tag_name(("http://www.w3.org/2000/svg", "text")));
+
+    let mut fontdb = fontdb::Database::new();
+    if has_text_nodes {
+        timed(args.perf, "FontDB", || load_fonts(&mut args, &mut fontdb));
         if args.list_fonts {
             for face in fontdb.faces() {
                 if let fontdb::Source::File(ref path) = &face.source {
@@ -111,9 +109,11 @@ fn process() -> Result<(), String> {
                 }
             }
         }
-
-        timed(args.perf, "Text Conversion", || tree.convert_text(&fontdb));
     }
+
+    let tree = timed(args.perf, "SVG Parsing", || {
+        usvg::Tree::from_xmltree(&xml_tree, &args.usvg, &fontdb).map_err(|e| e.to_string())
+    })?;
 
     if args.query_all {
         return query_all(&tree);
@@ -573,8 +573,7 @@ fn parse_args() -> Result<Args, String> {
     })
 }
 
-fn load_fonts(args: &mut Args) -> fontdb::Database {
-    let mut fontdb = fontdb::Database::new();
+fn load_fonts(args: &mut Args, fontdb: &mut fontdb::Database) {
     if !args.skip_system_fonts {
         fontdb.load_system_fonts();
     }
@@ -597,14 +596,25 @@ fn load_fonts(args: &mut Args) -> fontdb::Database {
     fontdb.set_cursive_family(take_or(args.cursive_family.take(), "Comic Sans MS"));
     fontdb.set_fantasy_family(take_or(args.fantasy_family.take(), "Impact"));
     fontdb.set_monospace_family(take_or(args.monospace_family.take(), "Courier New"));
-
-    fontdb
 }
 
 fn query_all(tree: &usvg::Tree) -> Result<(), String> {
+    let count = query_all_impl(tree.root());
+
+    if count == 0 {
+        return Err("the file has no valid ID's".to_string());
+    }
+
+    Ok(())
+}
+
+fn query_all_impl(parent: &usvg::Group) -> usize {
     let mut count = 0;
-    for node in tree.root.descendants() {
+    for node in parent.children() {
         if node.id().is_empty() {
+            if let usvg::Node::Group(ref group) = node {
+                count += query_all_impl(group);
+            }
             continue;
         }
 
@@ -614,37 +624,39 @@ fn query_all(tree: &usvg::Tree) -> Result<(), String> {
             (v * 1000.0).round() / 1000.0
         }
 
-        if let Some(bbox) = node.calculate_bbox() {
-            println!(
-                "{},{},{},{},{}",
-                node.id(),
-                round_len(bbox.x()),
-                round_len(bbox.y()),
-                round_len(bbox.width()),
-                round_len(bbox.height())
-            );
+        let bbox = node
+            .abs_layer_bounding_box()
+            .map(|r| r.to_rect())
+            .unwrap_or(node.abs_bounding_box());
+
+        println!(
+            "{},{},{},{},{}",
+            node.id(),
+            round_len(bbox.x()),
+            round_len(bbox.y()),
+            round_len(bbox.width()),
+            round_len(bbox.height())
+        );
+
+        if let usvg::Node::Group(ref group) = node {
+            count += query_all_impl(group);
         }
     }
 
-    if count == 0 {
-        return Err("the file has no valid ID's".to_string());
-    }
-
-    Ok(())
+    count
 }
 
 fn render_svg(args: &Args, tree: &usvg::Tree) -> Result<tiny_skia::Pixmap, String> {
     let now = std::time::Instant::now();
 
     let img = if let Some(ref id) = args.export_id {
-        let node = match tree.root.descendants().find(|n| &*n.id() == id) {
+        let node = match tree.node_by_id(id) {
             Some(node) => node,
             None => return Err(format!("SVG doesn't have '{}' ID", id)),
         };
 
         let bbox = node
-            .calculate_bbox()
-            .and_then(|r| r.to_non_zero_rect())
+            .abs_layer_bounding_box()
             .ok_or_else(|| "node has zero size".to_string())?;
 
         let size = args
@@ -661,19 +673,16 @@ fn render_svg(args: &Args, tree: &usvg::Tree) -> Result<tiny_skia::Pixmap, Strin
             }
         }
 
-        let ts = args.fit_to.fit_to_transform(tree.size.to_int_size());
+        let ts = args.fit_to.fit_to_transform(tree.size().to_int_size());
 
-        let rtree = resvg::Tree::from_usvg_node(&node)
-            .ok_or_else(|| "zero-size node detected".to_string())?;
-
-        rtree.render(ts, &mut pixmap.as_mut());
+        resvg::render_node(node, ts, &mut pixmap.as_mut());
 
         if args.export_area_page {
             // TODO: add offset support to render_node() so we would not need an additional pixmap
 
             let size = args
                 .fit_to
-                .fit_to_size(tree.size.to_int_size())
+                .fit_to_size(tree.size().to_int_size())
                 .ok_or_else(|| "target size is zero".to_string())?;
 
             // Unwrap is safe, because `size` is already valid.
@@ -698,7 +707,7 @@ fn render_svg(args: &Args, tree: &usvg::Tree) -> Result<tiny_skia::Pixmap, Strin
     } else {
         let size = args
             .fit_to
-            .fit_to_size(tree.size.to_int_size())
+            .fit_to_size(tree.size().to_int_size())
             .ok_or_else(|| "target size is zero".to_string())?;
 
         // Unwrap is safe, because `size` is already valid.
@@ -708,34 +717,31 @@ fn render_svg(args: &Args, tree: &usvg::Tree) -> Result<tiny_skia::Pixmap, Strin
             pixmap.fill(svg_to_skia_color(background));
         }
 
-        let ts = args.fit_to.fit_to_transform(tree.size.to_int_size());
+        let ts = args.fit_to.fit_to_transform(tree.size().to_int_size());
 
-        let rtree = resvg::Tree::from_usvg(tree);
-        rtree.render(ts, &mut pixmap.as_mut());
+        resvg::render(tree, ts, &mut pixmap.as_mut());
 
         if args.export_area_drawing {
-            trim_pixmap(&rtree, ts, &pixmap).unwrap_or(pixmap)
+            trim_pixmap(tree, ts, &pixmap).unwrap_or(pixmap)
         } else {
             pixmap
         }
     };
 
     if args.perf {
-        println!(
-            "Rendering: {:.2}ms",
-            now.elapsed().as_micros() as f64 / 1000.0
-        );
+        let elapsed = now.elapsed().as_micros() as f64 / 1000.0;
+        println!("Rendering: {:.2}ms", elapsed);
     }
 
     Ok(img)
 }
 
 fn trim_pixmap(
-    rtree: &resvg::Tree,
+    tree: &usvg::Tree,
     transform: tiny_skia::Transform,
     pixmap: &tiny_skia::Pixmap,
 ) -> Option<tiny_skia::Pixmap> {
-    let content_area = rtree.content_area?.to_non_zero_rect()?;
+    let content_area = tree.root().layer_bounding_box();
 
     let limit = tiny_skia::IntRect::from_xywh(0, 0, pixmap.width(), pixmap.height()).unwrap();
 
@@ -797,15 +803,14 @@ impl log::Log for SimpleLogger {
             };
 
             let line = record.line().unwrap_or(0);
+            let args = record.args();
 
             match record.level() {
-                log::Level::Error => eprintln!("Error (in {}:{}): {}", target, line, record.args()),
-                log::Level::Warn => {
-                    eprintln!("Warning (in {}:{}): {}", target, line, record.args())
-                }
-                log::Level::Info => eprintln!("Info (in {}:{}): {}", target, line, record.args()),
-                log::Level::Debug => eprintln!("Debug (in {}:{}): {}", target, line, record.args()),
-                log::Level::Trace => eprintln!("Trace (in {}:{}): {}", target, line, record.args()),
+                log::Level::Error => eprintln!("Error (in {}:{}): {}", target, line, args),
+                log::Level::Warn => eprintln!("Warning (in {}:{}): {}", target, line, args),
+                log::Level::Info => eprintln!("Info (in {}:{}): {}", target, line, args),
+                log::Level::Debug => eprintln!("Debug (in {}:{}): {}", target, line, args),
+                log::Level::Trace => eprintln!("Trace (in {}:{}): {}", target, line, args),
             }
         }
     }

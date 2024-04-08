@@ -13,9 +13,9 @@ use std::os::raw::c_char;
 use std::slice;
 
 use resvg::tiny_skia;
-use resvg::usvg::{self, NodeExt, TreeParsing};
+use resvg::usvg;
 #[cfg(feature = "text")]
-use resvg::usvg::{fontdb, TreeTextToPath};
+use resvg::usvg::fontdb;
 
 /// @brief List of possible errors.
 #[repr(C)]
@@ -526,16 +526,17 @@ pub extern "C" fn resvg_parse_tree_from_file(
         Err(_) => return resvg_error::FILE_OPEN_FAILED as i32,
     };
 
-    #[allow(unused_mut)]
-    let mut utree = match usvg::Tree::from_data(&file_data, &raw_opt.options) {
+    let utree = usvg::Tree::from_data(
+        &file_data,
+        &raw_opt.options,
+        #[cfg(feature = "text")]
+        &raw_opt.fontdb,
+    );
+
+    let utree = match utree {
         Ok(tree) => tree,
         Err(e) => return convert_error(e) as i32,
     };
-
-    #[cfg(feature = "text")]
-    {
-        utree.convert_text(&raw_opt.fontdb);
-    }
 
     let tree_box = Box::new(resvg_render_tree(utree));
     unsafe {
@@ -568,16 +569,17 @@ pub extern "C" fn resvg_parse_tree_from_data(
         &*opt
     };
 
-    #[allow(unused_mut)]
-    let mut utree = match usvg::Tree::from_data(data, &raw_opt.options) {
+    let utree = usvg::Tree::from_data(
+        data,
+        &raw_opt.options,
+        #[cfg(feature = "text")]
+        &raw_opt.fontdb,
+    );
+
+    let utree = match utree {
         Ok(tree) => tree,
         Err(e) => return convert_error(e) as i32,
     };
-
-    #[cfg(feature = "text")]
-    {
-        utree.convert_text(&raw_opt.fontdb);
-    }
 
     let tree_box = Box::new(resvg_render_tree(utree));
     unsafe {
@@ -598,7 +600,7 @@ pub extern "C" fn resvg_is_image_empty(tree: *const resvg_render_tree) -> bool {
         &*tree
     };
 
-    !tree.0.root.has_children()
+    !tree.0.root().has_children()
 }
 
 /// @brief Returns an image size.
@@ -616,7 +618,7 @@ pub extern "C" fn resvg_get_image_size(tree: *const resvg_render_tree) -> resvg_
         &*tree
     };
 
-    let size = tree.0.size;
+    let size = tree.0.size();
 
     resvg_size {
         width: size.width(),
@@ -637,7 +639,7 @@ pub extern "C" fn resvg_get_image_viewbox(tree: *const resvg_render_tree) -> res
         &*tree
     };
 
-    let r = tree.0.view_box.rect;
+    let r = tree.0.view_box().rect;
 
     resvg_rect {
         x: r.x(),
@@ -664,12 +666,7 @@ pub extern "C" fn resvg_get_image_bbox(
         &*tree
     };
 
-    if let Some(r) = tree
-        .0
-        .root
-        .calculate_bbox()
-        .and_then(|r| r.to_non_zero_rect())
-    {
+    if let Some(r) = tree.0.root().abs_bounding_box().to_non_zero_rect() {
         unsafe {
             *bbox = resvg_rect {
                 x: r.x(),
@@ -757,7 +754,7 @@ pub extern "C" fn resvg_get_node_transform(
     false
 }
 
-/// @brief Returns node's bounding box by ID.
+/// @brief Returns node's bounding box in canvas coordinates by ID.
 ///
 /// @param tree Render tree.
 /// @param id Node's ID. Must not be NULL.
@@ -770,6 +767,32 @@ pub extern "C" fn resvg_get_node_bbox(
     tree: *const resvg_render_tree,
     id: *const c_char,
     bbox: *mut resvg_rect,
+) -> bool {
+    get_node_bbox(tree, id, bbox, &|node| node.abs_bounding_box())
+}
+
+/// @brief Returns node's bounding box, including stroke, in canvas coordinates by ID.
+///
+/// @param tree Render tree.
+/// @param id Node's ID. Must not be NULL.
+/// @param bbox Node's bounding box.
+/// @return `false` if a node with such an ID does not exist
+/// @return `false` if ID isn't a UTF-8 string.
+/// @return `false` if ID is an empty string
+#[no_mangle]
+pub extern "C" fn resvg_get_node_stroke_bbox(
+    tree: *const resvg_render_tree,
+    id: *const c_char,
+    bbox: *mut resvg_rect,
+) -> bool {
+    get_node_bbox(tree, id, bbox, &|node| node.abs_stroke_bounding_box())
+}
+
+fn get_node_bbox(
+    tree: *const resvg_render_tree,
+    id: *const c_char,
+    bbox: *mut resvg_rect,
+    f: &dyn Fn(&usvg::Node) -> usvg::Rect,
 ) -> bool {
     let id = match cstr_to_str(id) {
         Some(v) => v,
@@ -791,20 +814,16 @@ pub extern "C" fn resvg_get_node_bbox(
 
     match tree.0.node_by_id(id) {
         Some(node) => {
-            if let Some(r) = node.calculate_bbox() {
-                unsafe {
-                    *bbox = resvg_rect {
-                        x: r.x(),
-                        y: r.y(),
-                        width: r.width(),
-                        height: r.height(),
-                    }
+            let r = f(node);
+            unsafe {
+                *bbox = resvg_rect {
+                    x: r.x(),
+                    y: r.y(),
+                    width: r.width(),
+                    height: r.height(),
                 }
-
-                true
-            } else {
-                false
             }
+            true
         }
         None => {
             log::warn!("No node with '{}' ID is in the tree.", id);
@@ -867,8 +886,7 @@ pub extern "C" fn resvg_render(
         unsafe { std::slice::from_raw_parts_mut(pixmap as *mut u8, pixmap_len) };
     let mut pixmap = tiny_skia::PixmapMut::from_bytes(pixmap, width, height).unwrap();
 
-    let rtree = resvg::Tree::from_usvg(&tree.0);
-    rtree.render(transform.to_tiny_skia(), &mut pixmap);
+    resvg::render(&tree.0, transform.to_tiny_skia(), &mut pixmap)
 }
 
 /// @brief Renders a Node by ID onto the image.
@@ -913,12 +931,7 @@ pub extern "C" fn resvg_render_node(
             unsafe { std::slice::from_raw_parts_mut(pixmap as *mut u8, pixmap_len) };
         let mut pixmap = tiny_skia::PixmapMut::from_bytes(pixmap, width, height).unwrap();
 
-        if let Some(rtree) = resvg::Tree::from_usvg_node(&node) {
-            rtree.render(transform.to_tiny_skia(), &mut pixmap);
-            true
-        } else {
-            false
-        }
+        resvg::render_node(node, transform.to_tiny_skia(), &mut pixmap).is_some()
     } else {
         log::warn!("A node with '{}' ID wasn't found.", id);
         false
@@ -942,15 +955,14 @@ impl log::Log for SimpleLogger {
             };
 
             let line = record.line().unwrap_or(0);
+            let args = record.args();
 
             match record.level() {
-                log::Level::Error => eprintln!("Error (in {}:{}): {}", target, line, record.args()),
-                log::Level::Warn => {
-                    eprintln!("Warning (in {}:{}): {}", target, line, record.args())
-                }
-                log::Level::Info => eprintln!("Info (in {}:{}): {}", target, line, record.args()),
-                log::Level::Debug => eprintln!("Debug (in {}:{}): {}", target, line, record.args()),
-                log::Level::Trace => eprintln!("Trace (in {}:{}): {}", target, line, record.args()),
+                log::Level::Error => eprintln!("Error (in {}:{}): {}", target, line, args),
+                log::Level::Warn => eprintln!("Warning (in {}:{}): {}", target, line, args),
+                log::Level::Info => eprintln!("Info (in {}:{}): {}", target, line, args),
+                log::Level::Debug => eprintln!("Debug (in {}:{}): {}", target, line, args),
+                log::Level::Trace => eprintln!("Trace (in {}:{}): {}", target, line, args),
             }
         }
     }

@@ -8,8 +8,6 @@ use rgb::{FromSlice, RGBA8};
 use tiny_skia::IntRect;
 use usvg::{ApproxEqUlps, ApproxZeroUlps};
 
-use crate::tree::Node;
-
 mod box_blur;
 mod color_matrix;
 mod component_transfer;
@@ -83,134 +81,6 @@ impl<'a> ImageRefMut<'a> {
     #[inline]
     fn pixel_at_mut(&mut self, x: u32, y: u32) -> &mut RGBA8 {
         &mut self.data[(self.width * y + x) as usize]
-    }
-}
-
-pub struct Primitive {
-    pub region: tiny_skia::NonZeroRect,
-    pub color_interpolation: usvg::filter::ColorInterpolation,
-    pub result: String,
-    pub kind: usvg::filter::Kind,
-}
-
-pub struct Filter {
-    pub region: tiny_skia::NonZeroRect,
-    pub primitives: Vec<Primitive>,
-}
-
-pub fn convert(
-    ufilters: &[Rc<usvg::filter::Filter>],
-    object_bbox: Option<tiny_skia::Rect>,
-) -> (Vec<Filter>, Option<tiny_skia::Rect>) {
-    let object_bbox = object_bbox.and_then(|bbox| bbox.to_non_zero_rect());
-
-    let region = match calc_filters_region(ufilters, object_bbox) {
-        Some(v) => v,
-        None => return (Vec::new(), None),
-    };
-
-    let mut filters = Vec::new();
-    for ufilter in ufilters {
-        let filter = match convert_filter(ufilter, object_bbox, region) {
-            Some(v) => v,
-            None => return (Vec::new(), None),
-        };
-        filters.push(filter);
-    }
-
-    (filters, Some(region.to_rect()))
-}
-
-fn convert_filter(
-    ufilter: &usvg::filter::Filter,
-    object_bbox: Option<tiny_skia::NonZeroRect>,
-    region: tiny_skia::NonZeroRect,
-) -> Option<Filter> {
-    let mut primitives = Vec::with_capacity(ufilter.primitives.len());
-    for uprimitive in &ufilter.primitives {
-        let subregion = match calc_subregion(ufilter, uprimitive, object_bbox, region) {
-            Some(v) => v,
-            None => {
-                log::warn!("Invalid filter primitive region.");
-                continue;
-            }
-        };
-
-        if let Some(kind) = convert_primitive(uprimitive, ufilter.primitive_units, object_bbox) {
-            primitives.push(Primitive {
-                region: subregion,
-                color_interpolation: uprimitive.color_interpolation,
-                result: uprimitive.result.clone(),
-                kind,
-            });
-        }
-    }
-
-    Some(Filter { region, primitives })
-}
-
-fn convert_primitive(
-    uprimitive: &usvg::filter::Primitive,
-    units: usvg::Units,
-    object_bbox: Option<tiny_skia::NonZeroRect>,
-) -> Option<usvg::filter::Kind> {
-    match uprimitive.kind {
-        usvg::filter::Kind::DisplacementMap(ref fe) => {
-            let (sx, _) = scale_coordinates(fe.scale, fe.scale, units, object_bbox)?;
-            Some(usvg::filter::Kind::DisplacementMap(
-                usvg::filter::DisplacementMap {
-                    input1: fe.input1.clone(),
-                    input2: fe.input2.clone(),
-                    scale: sx,
-                    x_channel_selector: fe.x_channel_selector,
-                    y_channel_selector: fe.y_channel_selector,
-                },
-            ))
-        }
-        usvg::filter::Kind::DropShadow(ref fe) => {
-            let (dx, dy) = scale_coordinates(fe.dx, fe.dy, units, object_bbox)?;
-            let (std_dev_x, std_dev_y) =
-                scale_coordinates(fe.std_dev_x.get(), fe.std_dev_y.get(), units, object_bbox)?;
-            Some(usvg::filter::Kind::DropShadow(usvg::filter::DropShadow {
-                input: fe.input.clone(),
-                dx,
-                dy,
-                std_dev_x: usvg::PositiveF32::new(std_dev_x).unwrap_or_default(),
-                std_dev_y: usvg::PositiveF32::new(std_dev_y).unwrap_or_default(),
-                color: fe.color,
-                opacity: fe.opacity,
-            }))
-        }
-        usvg::filter::Kind::GaussianBlur(ref fe) => {
-            let (std_dev_x, std_dev_y) =
-                scale_coordinates(fe.std_dev_x.get(), fe.std_dev_y.get(), units, object_bbox)?;
-            Some(usvg::filter::Kind::GaussianBlur(
-                usvg::filter::GaussianBlur {
-                    input: fe.input.clone(),
-                    std_dev_x: usvg::PositiveF32::new(std_dev_x).unwrap_or_default(),
-                    std_dev_y: usvg::PositiveF32::new(std_dev_y).unwrap_or_default(),
-                },
-            ))
-        }
-        usvg::filter::Kind::Morphology(ref fe) => {
-            let (radius_x, radius_y) =
-                scale_coordinates(fe.radius_x.get(), fe.radius_y.get(), units, object_bbox)?;
-            Some(usvg::filter::Kind::Morphology(usvg::filter::Morphology {
-                input: fe.input.clone(),
-                operator: fe.operator,
-                radius_x: usvg::PositiveF32::new(radius_x).unwrap_or_default(),
-                radius_y: usvg::PositiveF32::new(radius_y).unwrap_or_default(),
-            }))
-        }
-        usvg::filter::Kind::Offset(ref fe) => {
-            let (dx, dy) = scale_coordinates(fe.dx, fe.dy, units, object_bbox)?;
-            Some(usvg::filter::Kind::Offset(usvg::filter::Offset {
-                input: fe.input.clone(),
-                dx,
-                dy,
-            }))
-        }
-        _ => Some(uprimitive.kind.clone()),
     }
 }
 
@@ -463,7 +333,11 @@ struct FilterResult {
     image: Image,
 }
 
-pub fn apply(filter: &Filter, ts: tiny_skia::Transform, source: &mut tiny_skia::Pixmap) {
+pub fn apply(
+    filter: &usvg::filter::Filter,
+    ts: tiny_skia::Transform,
+    source: &mut tiny_skia::Pixmap,
+) {
     let result = apply_inner(filter, ts, source);
     let result = result.and_then(|image| apply_to_canvas(image, source));
 
@@ -482,93 +356,94 @@ pub fn apply(filter: &Filter, ts: tiny_skia::Transform, source: &mut tiny_skia::
 }
 
 fn apply_inner(
-    filter: &Filter,
+    filter: &usvg::filter::Filter,
     ts: usvg::Transform,
     source: &mut tiny_skia::Pixmap,
 ) -> Result<Image, Error> {
-    let mut results: Vec<FilterResult> = Vec::new();
-
     let region = filter
-        .region
+        .rect()
         .transform(ts)
         .map(|r| r.to_int_rect())
         .ok_or(Error::InvalidRegion)?;
 
-    for primitive in &filter.primitives {
-        let cs = primitive.color_interpolation;
+    let mut results: Vec<FilterResult> = Vec::new();
+
+    for primitive in filter.primitives() {
         let mut subregion = primitive
-            .region
+            .rect()
             .transform(ts)
             .map(|r| r.to_int_rect())
             .ok_or(Error::InvalidRegion)?;
 
         // `feOffset` inherits its region from the input.
-        if let usvg::filter::Kind::Offset(ref fe) = primitive.kind {
-            if let usvg::filter::Input::Reference(ref name) = fe.input {
+        if let usvg::filter::Kind::Offset(ref fe) = primitive.kind() {
+            if let usvg::filter::Input::Reference(ref name) = fe.input() {
                 if let Some(res) = results.iter().rev().find(|v| v.name == *name) {
                     subregion = res.image.region;
                 }
             }
         }
 
-        let mut result = match primitive.kind {
+        let cs = primitive.color_interpolation();
+
+        let mut result = match primitive.kind() {
             usvg::filter::Kind::Blend(ref fe) => {
-                let input1 = get_input(&fe.input1, region, source, &results)?;
-                let input2 = get_input(&fe.input2, region, source, &results)?;
+                let input1 = get_input(fe.input1(), region, source, &results)?;
+                let input2 = get_input(fe.input2(), region, source, &results)?;
                 apply_blend(fe, cs, region, input1, input2)
             }
             usvg::filter::Kind::DropShadow(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_drop_shadow(fe, cs, ts, input)
             }
             usvg::filter::Kind::Flood(ref fe) => apply_flood(fe, region),
             usvg::filter::Kind::GaussianBlur(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_blur(fe, cs, ts, input)
             }
             usvg::filter::Kind::Offset(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_offset(fe, ts, input)
             }
             usvg::filter::Kind::Composite(ref fe) => {
-                let input1 = get_input(&fe.input1, region, source, &results)?;
-                let input2 = get_input(&fe.input2, region, source, &results)?;
+                let input1 = get_input(fe.input1(), region, source, &results)?;
+                let input2 = get_input(fe.input2(), region, source, &results)?;
                 apply_composite(fe, cs, region, input1, input2)
             }
             usvg::filter::Kind::Merge(ref fe) => apply_merge(fe, cs, region, source, &results),
             usvg::filter::Kind::Tile(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_tile(input, region)
             }
             usvg::filter::Kind::Image(ref fe) => apply_image(fe, region, subregion, ts),
             usvg::filter::Kind::ComponentTransfer(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_component_transfer(fe, cs, input)
             }
             usvg::filter::Kind::ColorMatrix(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_color_matrix(fe, cs, input)
             }
             usvg::filter::Kind::ConvolveMatrix(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_convolve_matrix(fe, cs, input)
             }
             usvg::filter::Kind::Morphology(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_morphology(fe, cs, ts, input)
             }
             usvg::filter::Kind::DisplacementMap(ref fe) => {
-                let input1 = get_input(&fe.input1, region, source, &results)?;
-                let input2 = get_input(&fe.input2, region, source, &results)?;
+                let input1 = get_input(fe.input1(), region, source, &results)?;
+                let input2 = get_input(fe.input2(), region, source, &results)?;
                 apply_displacement_map(fe, region, cs, ts, input1, input2)
             }
             usvg::filter::Kind::Turbulence(ref fe) => apply_turbulence(fe, region, cs, ts),
             usvg::filter::Kind::DiffuseLighting(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_diffuse_lighting(fe, region, cs, ts, input)
             }
             usvg::filter::Kind::SpecularLighting(ref fe) => {
-                let input = get_input(&fe.input, region, source, &results)?;
+                let input = get_input(fe.input(), region, source, &results)?;
                 apply_specular_lighting(fe, region, cs, ts, input)
             }
         }?;
@@ -577,7 +452,7 @@ fn apply_inner(
             // Clip result.
 
             // TODO: explain
-            let subregion2 = if let usvg::filter::Kind::Offset(..) = primitive.kind {
+            let subregion2 = if let usvg::filter::Kind::Offset(..) = primitive.kind() {
                 // We do not support clipping on feOffset.
                 region.translate_to(0, 0)
             } else {
@@ -627,7 +502,7 @@ fn apply_inner(
         }
 
         results.push(FilterResult {
-            name: primitive.result.clone(),
+            name: primitive.result().to_string(),
             image: result,
         });
     }
@@ -637,94 +512,6 @@ fn apply_inner(
     } else {
         Err(Error::NoResults)
     }
-}
-
-// TODO: merge with mask region logic
-fn calc_region(
-    filter: &usvg::filter::Filter,
-    object_bbox: Option<tiny_skia::NonZeroRect>,
-) -> Option<tiny_skia::NonZeroRect> {
-    if filter.units == usvg::Units::ObjectBoundingBox {
-        Some(filter.rect.bbox_transform(object_bbox?))
-    } else {
-        Some(filter.rect)
-    }
-}
-
-pub fn calc_filters_region(
-    filters: &[Rc<usvg::filter::Filter>],
-    object_bbox: Option<tiny_skia::NonZeroRect>,
-) -> Option<tiny_skia::NonZeroRect> {
-    let mut global_region = usvg::BBox::default();
-
-    for filter in filters {
-        if let Some(region) = calc_region(filter, object_bbox) {
-            global_region = global_region.expand(usvg::BBox::from(region));
-        }
-    }
-
-    if !global_region.is_default() {
-        global_region.to_non_zero_rect()
-    } else {
-        None
-    }
-}
-
-fn calc_subregion(
-    filter: &usvg::filter::Filter,
-    primitive: &usvg::filter::Primitive,
-    bbox: Option<tiny_skia::NonZeroRect>,
-    region: tiny_skia::NonZeroRect,
-) -> Option<tiny_skia::NonZeroRect> {
-    // TODO: rewrite/simplify/explain/whatever
-
-    let region = match primitive.kind {
-        usvg::filter::Kind::Flood(..) | usvg::filter::Kind::Image(..) => {
-            // `feImage` uses the object bbox.
-            if filter.primitive_units == usvg::Units::ObjectBoundingBox {
-                let bbox = bbox?;
-
-                // TODO: wrong
-                // let ts_bbox = tiny_skia::Rect::new(ts.e, ts.f, ts.a, ts.d).unwrap();
-
-                let r = tiny_skia::NonZeroRect::from_xywh(
-                    primitive.x.unwrap_or(0.0),
-                    primitive.y.unwrap_or(0.0),
-                    primitive.width.unwrap_or(1.0),
-                    primitive.height.unwrap_or(1.0),
-                )?;
-
-                let r = r.bbox_transform(bbox);
-                // .bbox_transform(ts_bbox);
-
-                return Some(r);
-            } else {
-                region
-            }
-        }
-        _ => region,
-    };
-
-    // TODO: Wrong! Does not account rotate and skew.
-    let subregion = if filter.primitive_units == usvg::Units::ObjectBoundingBox {
-        let subregion_bbox = tiny_skia::NonZeroRect::from_xywh(
-            primitive.x.unwrap_or(0.0),
-            primitive.y.unwrap_or(0.0),
-            primitive.width.unwrap_or(1.0),
-            primitive.height.unwrap_or(1.0),
-        )?;
-
-        region.bbox_transform(subregion_bbox)
-    } else {
-        tiny_skia::NonZeroRect::from_xywh(
-            primitive.x.unwrap_or(region.x()),
-            primitive.y.unwrap_or(region.y()),
-            primitive.width.unwrap_or(region.width()),
-            primitive.height.unwrap_or(region.height()),
-        )?
-    };
-
-    Some(subregion)
 }
 
 fn get_input(
@@ -791,13 +578,17 @@ fn apply_drop_shadow(
     ts: usvg::Transform,
     input: Image,
 ) -> Result<Image, Error> {
+    let (dx, dy) = match scale_coordinates(fe.dx(), fe.dy(), ts) {
+        Some(v) => v,
+        None => return Ok(input),
+    };
+
     let mut pixmap = tiny_skia::Pixmap::try_create(input.width(), input.height())?;
     let input_pixmap = input.into_color_space(cs)?.take()?;
     let mut shadow_pixmap = input_pixmap.clone();
 
-    let (sx, sy) = ts.get_scale();
     if let Some((std_dx, std_dy, use_box_blur)) =
-        resolve_std_dev(fe.std_dev_x.get() * sx, fe.std_dev_y.get() * sy)
+        resolve_std_dev(fe.std_dev_x().get(), fe.std_dev_y().get(), ts)
     {
         if use_box_blur {
             box_blur::apply(std_dx, std_dy, shadow_pixmap.as_image_ref_mut());
@@ -808,10 +599,10 @@ fn apply_drop_shadow(
 
     // flood
     let color = tiny_skia::Color::from_rgba8(
-        fe.color.red,
-        fe.color.green,
-        fe.color.blue,
-        fe.opacity.to_u8(),
+        fe.color().red,
+        fe.color().green,
+        fe.color().blue,
+        fe.opacity().to_u8(),
     );
     for p in shadow_pixmap.pixels_mut() {
         let mut color = color;
@@ -825,8 +616,8 @@ fn apply_drop_shadow(
     }
 
     pixmap.draw_pixmap(
-        (fe.dx * sx) as i32,
-        (fe.dy * sy) as i32,
+        dx as i32,
+        dy as i32,
         shadow_pixmap.as_ref(),
         &tiny_skia::PixmapPaint::default(),
         tiny_skia::Transform::identity(),
@@ -851,9 +642,8 @@ fn apply_blur(
     ts: usvg::Transform,
     input: Image,
 ) -> Result<Image, Error> {
-    let (sx, sy) = ts.get_scale();
     let (std_dx, std_dy, use_box_blur) =
-        match resolve_std_dev(fe.std_dev_x.get() * sx, fe.std_dev_y.get() * sy) {
+        match resolve_std_dev(fe.std_dev_x().get(), fe.std_dev_y().get(), ts) {
             Some(v) => v,
             None => return Ok(input),
         };
@@ -874,9 +664,10 @@ fn apply_offset(
     ts: usvg::Transform,
     input: Image,
 ) -> Result<Image, Error> {
-    let (sx, sy) = ts.get_scale();
-    let dx = fe.dx * sx;
-    let dy = fe.dy * sy;
+    let (dx, dy) = match scale_coordinates(fe.dx(), fe.dy(), ts) {
+        Some(v) => v,
+        None => return Ok(input),
+    };
 
     if dx.approx_zero_ulps(4) && dy.approx_zero_ulps(4) {
         return Ok(input);
@@ -921,7 +712,7 @@ fn apply_blend(
         0,
         input1.as_ref().as_ref(),
         &tiny_skia::PixmapPaint {
-            blend_mode: crate::tree::convert_blend_mode(fe.mode),
+            blend_mode: crate::render::convert_blend_mode(fe.mode()),
             ..tiny_skia::PixmapPaint::default()
         },
         tiny_skia::Transform::identity(),
@@ -945,7 +736,7 @@ fn apply_composite(
 
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
 
-    if let Operator::Arithmetic { k1, k2, k3, k4 } = fe.operator {
+    if let Operator::Arithmetic { k1, k2, k3, k4 } = fe.operator() {
         let pixmap1 = input1.take()?;
         let pixmap2 = input2.take()?;
 
@@ -971,7 +762,7 @@ fn apply_composite(
         None,
     );
 
-    let blend_mode = match fe.operator {
+    let blend_mode = match fe.operator() {
         Operator::Over => tiny_skia::BlendMode::SourceOver,
         Operator::In => tiny_skia::BlendMode::SourceIn,
         Operator::Out => tiny_skia::BlendMode::SourceOut,
@@ -1004,7 +795,7 @@ fn apply_merge(
 ) -> Result<Image, Error> {
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
 
-    for input in &fe.inputs {
+    for input in fe.inputs() {
         let input = get_input(input, region, source, results)?;
         let input = input.into_color_space(cs)?;
         pixmap.draw_pixmap(
@@ -1021,14 +812,14 @@ fn apply_merge(
 }
 
 fn apply_flood(fe: &usvg::filter::Flood, region: IntRect) -> Result<Image, Error> {
-    let c = fe.color;
+    let c = fe.color();
 
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
     pixmap.fill(tiny_skia::Color::from_rgba8(
         c.red,
         c.green,
         c.blue,
-        fe.opacity.to_u8(),
+        fe.opacity().to_u8(),
     ));
 
     Ok(Image::from_image(
@@ -1069,7 +860,7 @@ fn apply_image(
 ) -> Result<Image, Error> {
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
 
-    match fe.data {
+    match fe.data() {
         usvg::filter::ImageKind::Image(ref kind) => {
             let dx = (subregion.x() - region.x()) as f32;
             let dy = (subregion.y() - region.y()) as f32;
@@ -1082,34 +873,35 @@ fn apply_image(
                     .to_rect()
                     .to_non_zero_rect()
                     .unwrap(),
-                aspect: fe.aspect,
+                aspect: fe.aspect(),
             };
 
-            let uimage = usvg::Image {
-                id: String::new(),
-                #[cfg(feature = "class")]
-                class: String::new(),
-                transform: usvg::Transform::default(),
-                visibility: usvg::Visibility::Visible,
+            crate::image::render_inner(
+                kind,
                 view_box,
-                rendering_mode: fe.rendering_mode,
-                kind: kind.clone(),
-            };
-
-            let mut children = Vec::new();
-            crate::image::convert(&uimage, &mut children);
-            if let Some(Node::Image(image)) = children.first() {
-                crate::image::render_image(image, transform, &mut pixmap.as_mut());
-            }
+                transform,
+                fe.rendering_mode(),
+                &mut pixmap.as_mut(),
+            );
         }
         usvg::filter::ImageKind::Use(ref node) => {
             let (sx, sy) = ts.get_scale();
-            let transform = tiny_skia::Transform::from_scale(sx, sy);
 
-            if let Some(mut rtree) = crate::Tree::from_usvg_node(node) {
-                rtree.view_box.rect = rtree.view_box.rect.translate_to(0.0, 0.0).unwrap();
-                rtree.render(transform, &mut pixmap.as_mut());
-            }
+            let transform = tiny_skia::Transform::from_row(
+                sx,
+                0.0,
+                0.0,
+                sy,
+                subregion.x() as f32,
+                subregion.y() as f32,
+            );
+
+            let ctx = crate::render::Context {
+                max_bbox: tiny_skia::IntRect::from_xywh(0, 0, region.width(), region.height())
+                    .unwrap(),
+            };
+
+            crate::render::render_nodes(node, &ctx, transform, &mut pixmap.as_mut());
         }
     }
 
@@ -1141,7 +933,7 @@ fn apply_color_matrix(
     let mut pixmap = input.into_color_space(cs)?.take()?;
 
     demultiply_alpha(pixmap.data_mut().as_rgba_mut());
-    color_matrix::apply(&fe.kind, pixmap.as_image_ref_mut());
+    color_matrix::apply(fe.kind(), pixmap.as_image_ref_mut());
     multiply_alpha(pixmap.data_mut().as_rgba_mut());
 
     Ok(Image::from_image(pixmap, cs))
@@ -1154,7 +946,7 @@ fn apply_convolve_matrix(
 ) -> Result<Image, Error> {
     let mut pixmap = input.into_color_space(cs)?.take()?;
 
-    if fe.preserve_alpha {
+    if fe.preserve_alpha() {
         demultiply_alpha(pixmap.data_mut().as_rgba_mut());
     }
 
@@ -1171,16 +963,17 @@ fn apply_morphology(
 ) -> Result<Image, Error> {
     let mut pixmap = input.into_color_space(cs)?.take()?;
 
-    let (sx, sy) = ts.get_scale();
-    let rx = fe.radius_x.get() * sx;
-    let ry = fe.radius_y.get() * sy;
+    let (rx, ry) = match scale_coordinates(fe.radius_x().get(), fe.radius_y().get(), ts) {
+        Some(v) => v,
+        None => return Ok(Image::from_image(pixmap, cs)),
+    };
 
     if !(rx > 0.0 && ry > 0.0) {
         pixmap.clear();
         return Ok(Image::from_image(pixmap, cs));
     }
 
-    morphology::apply(fe.operator, rx, ry, pixmap.as_image_ref_mut());
+    morphology::apply(fe.operator(), rx, ry, pixmap.as_image_ref_mut());
 
     Ok(Image::from_image(pixmap, cs))
 }
@@ -1198,7 +991,10 @@ fn apply_displacement_map(
 
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
 
-    let (sx, sy) = ts.get_scale();
+    let (sx, sy) = match scale_coordinates(fe.scale(), fe.scale(), ts) {
+        Some(v) => v,
+        None => return Ok(Image::from_image(pixmap1, cs)),
+    };
 
     displacement_map::apply(
         fe,
@@ -1230,12 +1026,12 @@ fn apply_turbulence(
         region.y() as f64 - ts.ty as f64,
         sx as f64,
         sy as f64,
-        fe.base_frequency_x.get() as f64,
-        fe.base_frequency_y.get() as f64,
-        fe.num_octaves,
-        fe.seed,
-        fe.stitch_tiles,
-        fe.kind == usvg::filter::TurbulenceKind::FractalNoise,
+        fe.base_frequency_x().get() as f64,
+        fe.base_frequency_y().get() as f64,
+        fe.num_octaves(),
+        fe.seed(),
+        fe.stitch_tiles(),
+        fe.kind() == usvg::filter::TurbulenceKind::FractalNoise,
         pixmap.as_image_ref_mut(),
     );
 
@@ -1253,7 +1049,7 @@ fn apply_diffuse_lighting(
 ) -> Result<Image, Error> {
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
 
-    let light_source = transform_light_source(fe.light_source, region, ts);
+    let light_source = transform_light_source(fe.light_source(), region, ts);
 
     lighting::diffuse_lighting(
         fe,
@@ -1274,7 +1070,7 @@ fn apply_specular_lighting(
 ) -> Result<Image, Error> {
     let mut pixmap = tiny_skia::Pixmap::try_create(region.width(), region.height())?;
 
-    let light_source = transform_light_source(fe.light_source, region, ts);
+    let light_source = transform_light_source(fe.light_source(), region, ts);
 
     lighting::specular_lighting(
         fe,
@@ -1286,6 +1082,7 @@ fn apply_specular_lighting(
     Ok(Image::from_image(pixmap, cs))
 }
 
+// TODO: do not modify LightSource
 fn transform_light_source(
     mut source: usvg::filter::LightSource,
     region: IntRect,
@@ -1342,7 +1139,9 @@ fn apply_to_canvas(input: Image, pixmap: &mut tiny_skia::Pixmap) -> Result<(), E
 /// Calculates Gaussian blur sigmas for the current world transform.
 ///
 /// If the last flag is set, then a box blur should be used. Or IIR otherwise.
-fn resolve_std_dev(mut std_dx: f32, mut std_dy: f32) -> Option<(f64, f64, bool)> {
+fn resolve_std_dev(std_dx: f32, std_dy: f32, ts: usvg::Transform) -> Option<(f64, f64, bool)> {
+    let (mut std_dx, mut std_dy) = scale_coordinates(std_dx, std_dy, ts)?;
+
     // 'A negative value or a value of zero disables the effect of the given filter primitive
     // (i.e., the result is the filter input image).'
     if std_dx.approx_eq_ulps(&0.0, 4) && std_dy.approx_eq_ulps(&0.0, 4) {
@@ -1365,17 +1164,7 @@ fn resolve_std_dev(mut std_dx: f32, mut std_dy: f32) -> Option<(f64, f64, bool)>
     Some((std_dx as f64, std_dy as f64, box_blur))
 }
 
-/// Converts coordinates from `objectBoundingBox` to the `userSpaceOnUse`.
-fn scale_coordinates(
-    x: f32,
-    y: f32,
-    units: usvg::Units,
-    bbox: Option<tiny_skia::NonZeroRect>,
-) -> Option<(f32, f32)> {
-    if units == usvg::Units::ObjectBoundingBox {
-        let bbox = bbox?;
-        Some((x * bbox.width(), y * bbox.height()))
-    } else {
-        Some((x, y))
-    }
+fn scale_coordinates(x: f32, y: f32, ts: usvg::Transform) -> Option<(f32, f32)> {
+    let (sx, sy) = ts.get_scale();
+    Some((x * sx, y * sy))
 }

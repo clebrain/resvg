@@ -73,7 +73,7 @@ NOTE: This list is not final. This just things I was able to find so far. Patche
 ### Added
 
 - [ ] A [`transform-box`](https://www.w3.org/TR/css-transforms-1/#transform-box) property.
-- [ ] A [`transform-origin`](https://www.w3.org/TR/css-transforms-1/#transform-origin-property) property.
+- [x] A [`transform-origin`](https://www.w3.org/TR/css-transforms-1/#transform-origin-property) property.
 - [ ] A [`vector-effect`](https://www.w3.org/TR/SVG2/coords.html#VectorEffects) property.
 
 ### Changed
@@ -141,7 +141,7 @@ Basically everything from [CSS Text Module Level 3](https://www.w3.org/TR/css-te
 - [ ] A [`shape-margin`](https://www.w3.org/TR/SVG2/text.html#TextShapeMargin) property.
 - [ ] A [`shape-padding`](https://www.w3.org/TR/SVG2/text.html#TextShapePadding) property.
 - [ ] New variants to [`font-variant`](https://drafts.csswg.org/css-fonts-3/#font-variant-prop) property. Previously it allowed only `small-caps`.
-- [ ] A `font-variant-css21` value to [`font`](https://www.w3.org/TR/css-fonts-3/#propdef-font) property.
+- [x] A `font-variant-css21` value to [`font`](https://www.w3.org/TR/css-fonts-3/#propdef-font) property.
 
 <!-- text-emphasis ? -->
 <!-- text-shadow ? -->
@@ -191,11 +191,11 @@ Basically everything from [CSS Text Module Level 3](https://www.w3.org/TR/css-te
 - [ ] An `arcs` variant to the [`stroke-linejoin`](https://www.w3.org/TR/SVG2/painting.html#LineJoin) property.
 - [x] A `miter-clip` variant to the [`stroke-linejoin`](https://www.w3.org/TR/SVG2/painting.html#LineJoin) property.
 - [x] (partial support) A [`paint-order`](https://www.w3.org/TR/SVG2/painting.html#PaintOrder) property.
-- [ ] `context-fill` and `context-stroke` variants to the [`<paint>`](https://www.w3.org/TR/SVG2/painting.html#SpecifyingPaint) type.
+- [x] `context-fill` and `context-stroke` variants to the [`<paint>`](https://www.w3.org/TR/SVG2/painting.html#SpecifyingPaint) type.
 - [x] A [`mix-blend-mode`](https://www.w3.org/TR/compositing-1/#mix-blend-mode) property.
 - [x] An [`isolation`](https://www.w3.org/TR/compositing-1/#isolation) property.
-- [ ] `left`, `center` and `right` variants to `refX` and `refY` properties of the the [`marker`](https://www.w3.org/TR/SVG2/painting.html#MarkerElement) element.
-- [x] An `auto-start-reverse` variant to [`orient`](https://www.w3.org/TR/SVG2/painting.html#OrientAttribute) property of the the [`marker`](https://www.w3.org/TR/SVG2/painting.html#MarkerElement) element
+- [ ] `left`, `center` and `right` variants to `refX` and `refY` properties of the [`marker`](https://www.w3.org/TR/SVG2/painting.html#MarkerElement) element.
+- [x] An `auto-start-reverse` variant to [`orient`](https://www.w3.org/TR/SVG2/painting.html#OrientAttribute) property of the [`marker`](https://www.w3.org/TR/SVG2/painting.html#MarkerElement) element
 
 ### Changed
 

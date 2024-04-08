@@ -8,6 +8,193 @@ This changelog also contains important changes in dependencies.
 
 ## [Unreleased]
 
+## [0.41.0] - 2024-04-03
+### Added
+- `context-fill` and `context-stroke` support.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- `usvg::Text::layouted()`, which returns a list of glyph IDs.
+  It can be used to manually draw glyphs, unlike with `usvg::Text::flattened()`, which returns
+  just vector paths.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+
+### Fixed
+- Missing text when a `text` element uses multiple fonts and one of them produces ligatures.
+- Absolute transform propagation during `use` resolving.
+- Absolute transform propagation during nested `svg` resolving.
+- `Node::abs_transform` documentation. The current element's transform _is_ included.
+
+## [0.40.0] - 2024-02-17
+### Added
+- `usvg::Tree` is `Send + Sync` compatible now.
+- `usvg::WriteOptions::preserve_text` to control how `usvg` generates an SVG.
+- `usvg::Image::abs_bounding_box`
+
+### Changed
+- All types in `usvg` are immutable now. Meaning that `usvg::Tree` cannot be modified
+  after creation anymore.
+- All struct fields in `usvg` are private now. Use getters instead.
+- All `usvg::Tree` parsing methods require the `fontdb` argument now.
+- All `defs` children like gradients, patterns, clipPaths, masks and filters are guarantee
+  to have a unique, non-empty ID.
+- All `defs` children like gradients, patterns, clipPaths, masks and filters are guarantee
+  to have `userSpaceOnUse` units now. No `objectBoundingBox` units anymore.
+- `usvg::Mask` is allowed to have no children now.
+- Text nodes will not be parsed when the `text` build feature isn't enabled.
+- `usvg::Tree::clip_paths`, `usvg::Tree::masks`, `usvg::Tree::filters` returns
+  a pre-collected slice of unique nodes now.
+  It's no longer a closure and you do not have to deduplicate nodes by yourself.
+- `usvg::filter::Primitive::x`, `y`, `width` and `height` methods were replaced
+  with `usvg::filter::Primitive::rect`.
+- Split `usvg::Tree::paint_servers` into `usvg::Tree::linear_gradients`,
+  `usvg::Tree::radial_gradients`, `usvg::Tree::patterns`.
+  All three returns pre-collected slices now.
+- A `usvg::Path` no longer can have an invalid bbox. Paths with an invalid bbox will be
+  rejected during parsing.
+- All `usvg` methods that return bounding boxes return non-optional `Rect` now.
+  No `NonZeroRect` as well.
+- `usvg::Text::flattened` returns `&Group` and not `Option<&Group>` now.
+- `usvg::ImageHrefDataResolverFn` and `usvg::ImageHrefStringResolverFn`
+  require `fontdb::Database` argument.
+- All shared nodes are stored in `Arc` and not `Rc<RefCell>` now.
+- `resvg::render_node` now includes filters bounding box. Meaning that a node with a blur filter
+  no longer be clipped.
+- Replace `usvg::utils::view_box_to_transform` with `usvg::ViewBox::to_transform`.
+- Rename `usvg::XmlOptions` into `usvg::WriteOptions` and embed `xmlwriter::Options`.
+
+### Removed
+- `usvg::Tree::postprocess()` and `usvg::PostProcessingSteps`. No longer needed.
+- `usvg::ClipPath::units()`, `usvg::Mask::units()`, `usvg::Mask::content_units()`,
+  `usvg::Filter::units()`, `usvg::Filter::content_units()`, `usvg::LinearGradient::units()`,
+  `usvg::RadialGradient::units()`, `usvg::Pattern::units()`, `usvg::Pattern::content_units()`
+  and `usvg::Paint::units()`. They are always `userSpaceOnUse` now.
+- `usvg::Units`. No longer needed.
+
+### Fixed
+- Text bounding box is accounted during SVG size resolving.
+  Previously, only paths and images were included.
+- Font selection when an italic font isn't explicitly marked as one.
+- Preserve `image` aspect ratio when only `width` or `height` are present.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+
+## [0.39.0] - 2024-02-06
+### Added
+- `font` shorthand parsing.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- `usvg::Group::abs_bounding_box`
+- `usvg::Group::abs_stroke_bounding_box`
+- `usvg::Path::abs_bounding_box`
+- `usvg::Path::abs_stroke_bounding_box`
+- `usvg::Text::abs_bounding_box`
+- `usvg::Text::abs_stroke_bounding_box`
+
+### Changed
+- All `usvg-*` crates merged into one. There is just the `usvg` crate now, as before.
+
+### Removed
+- `usvg::Group::abs_bounding_box()` method. It's a field now.
+- `usvg::Group::abs_filters_bounding_box()`
+- `usvg::TreeParsing`, `usvg::TreePostProc` and `usvg::TreeWriting` traits.
+  They are no longer needed.
+
+### Fixed
+- `font-family` parsing.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- Absolute bounding box calculation for paths.
+
+## [0.38.0] - 2024-01-21
+### Added
+- Each `usvg::Node` stores its absolute transform now.
+  `Node::abs_transform()` executes in constant time now.
+- `usvg::Tree::calculate_bounding_boxes` to calculate all bounding boxes beforehand.
+- `usvg::Node::bounding_box` which returns a precalculated node's bounding box in object coordinates.
+- `usvg::Node::abs_bounding_box` which returns a precalculated node's bounding box in canvas coordinates.
+- `usvg::Node::stroke_bounding_box` which returns a precalculated node's bounding box,
+  including stroke, in object coordinates.
+- `usvg::Node::abs_stroke_bounding_box` which returns a precalculated node's bounding box,
+  including stroke, in canvas coordinates.
+- (c-api) `resvg_get_node_stroke_bbox`
+- `usvg::Node::filters_bounding_box`
+- `usvg::Node::abs_filters_bounding_box`
+- `usvg::Tree::postprocess`
+
+### Changed
+- `resvg` renders `usvg::Tree` directly again. `resvg::Tree` is gone.
+- `usvg` no longer uses `rctree` for the nodes tree implementation.
+  The tree is a regular `enum` now.
+  - A caller no longer need to use the awkward `*node.borrow()`.
+  - No more panics on incorrect mutable `Rc<RefCell>` access.
+  - Tree nodes respect tree's mutability rules. Before, one could mutate tree nodes when the tree
+    itself is not mutable. Because `Rc<RefCell>` provides a shared mutable access.
+- Filters, clip paths, masks and patterns are stored as `Rc<RefCell<T>>` instead of `Rc<T>`.
+  This is required for proper mutability since `Node` itself is no longer an `Rc`.
+- Rename `usvg::NodeKind` into `usvg::Node`.
+- Upgrade to Rust 2021 edition.
+
+### Removed
+- `resvg::Tree`. No longer needed. `resvg` can render `usvg::Tree` directly once again.
+- `rctree::Node` methods. The `Node` API is completely different now.
+- `usvg::NodeExt`. No longer needed.
+- `usvg::Node::calculate_bbox`. Use `usvg::Node::abs_bounding_box` instead.
+- `usvg::Tree::convert_text`. Use `usvg::Tree::postprocess` instead.
+- `usvg::TreeTextToPath` trait. No longer needed.
+
+### Fixed
+- Mark `mask-type` as a presentation attribute.
+- Do not show needless warnings when parsing some attributes.
+- `feImage` rendering with a non-default position.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+
+## [0.37.0] - 2023-12-16
+### Added
+- `usvg` can write text back to SVG now.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- `--preserve-text` flag to the `usvg` CLI tool.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- Support [`transform-origin`](https://drafts.csswg.org/css-transforms/#transform-origin-property)
+  property.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- Support non-default markers order via
+  [`paint-order`](https://svgwg.org/svg2-draft/painting.html#PaintOrder).
+  Previously, only fill and stroke could have been swapped.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- `usvg_tree::Text::flattened` that will contain a flattened/outlined text.
+- `usvg_tree::Text::bounding_box`. Will be set only after text flattening.
+- Optimize `usvg_tree::NodeExt::abs_transform` by storing absolute transforms in the tree
+  instead of calculating them each time.
+
+### Changed
+- `usvg_tree::Text::positions` was replaced with `usvg_tree::Text::dx` and `usvg_tree::Text::dy`.<br>
+  `usvg_tree::CharacterPosition::x` and `usvg_tree::CharacterPosition::y` are gone.
+  They were redundant and you should use `usvg_tree::TextChunk::x`
+  and `usvg_tree::TextChunk::y` instead.
+- `usvg_tree::LinearGradient::id` and `usvg_tree::RadialGradient::id` are moved to
+  `usvg_tree::BaseGradient::id`.
+- Do not generate element IDs during parsing. Previously, some elements like `clipPath`s
+  and `filter`s could have generated IDs, but it wasn't very reliable and mostly unnecessary.
+  Renderer doesn't rely on them and usvg writer would generate them anyway.
+- Text-to-paths conversion via `usvg_text_layout::Tree::convert_text` no longer replaces
+  original text elements with paths, but instead puts them into `usvg_tree::Text::flattened`.
+
+### Removed
+- The `transform` field from `usvg_tree::Path`, `usvg_tree::Image` and `usvg_tree::Text`.
+  Only `usvg_tree::Group` can have it.<br>
+  It doesn't break anything, because those properties were never used before anyway.<br>
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- `usvg_tree::CharacterPosition`
+- `usvg_tree::Path::text_bbox`. Use `usvg_tree::Text::bounding_box` instead.
+- `usvg_text_layout::TextToPath` trait for `Text` nodes.
+  Only the whole tree can be converted at once.
+
+### Fixed
+- Path object bounding box calculation. We were using point bounds instead of tight contour bounds.
+  Was broken since v0.34
+- Convert text-to-paths in embedded SVGs as well. The one inside the `Image` node.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- Indirect `text-decoration` resolving in some cases.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+- (usvg) Clip paths writing to SVG.
+  Thanks to [@LaurenzV](https://github.com/LaurenzV).
+
 ## [0.36.0] - 2023-10-01
 ### Added
 - `stroke-linejoin=miter-clip` support. SVG2.
@@ -945,7 +1132,12 @@ This changelog also contains important changes in dependencies.
 ### Fixed
 - `font-size` attribute inheritance during `use` resolving.
 
-[Unreleased]: https://github.com/RazrFalcon/resvg/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/RazrFalcon/resvg/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/RazrFalcon/resvg/compare/v0.40.0...v0.41.0
+[0.40.0]: https://github.com/RazrFalcon/resvg/compare/v0.39.0...v0.40.0
+[0.39.0]: https://github.com/RazrFalcon/resvg/compare/v0.38.0...v0.39.0
+[0.38.0]: https://github.com/RazrFalcon/resvg/compare/v0.37.0...v0.38.0
+[0.37.0]: https://github.com/RazrFalcon/resvg/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/RazrFalcon/resvg/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/RazrFalcon/resvg/compare/v0.34.1...v0.35.0
 [0.34.1]: https://github.com/RazrFalcon/resvg/compare/v0.34.0...v0.34.1

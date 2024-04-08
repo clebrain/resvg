@@ -1,5 +1,5 @@
 ## resvg
-![Build Status](https://github.com/RazrFalcon/resvg/workflows/Rust/badge.svg)
+![Build Status](https://github.com/RazrFalcon/resvg/workflows/Build/badge.svg)
 [![Crates.io](https://img.shields.io/crates/v/resvg.svg)](https://crates.io/crates/resvg)
 [![Documentation](https://docs.rs/resvg/badge.svg)](https://docs.rs/resvg)
 [![Rust 1.65+](https://img.shields.io/badge/rust-1.65+-orange.svg)](https://www.rust-lang.org)
@@ -79,7 +79,7 @@ on ARM macOS - the produced image will be identical. Each pixel would have the s
   Nevertheless, native text rendering is optimized for small horizontal text, which is not
   that common is SVG.
 - Unicode-only<br>
-  It's the 21th century. Text files that aren't UTF-8 encoded are no longer relevant.
+  It's the 21st century. Text files that aren't UTF-8 encoded are no longer relevant.
 
 ## SVG support
 
@@ -122,7 +122,7 @@ Here are some of them:
 - [rustybuzz] - a [harfbuzz](https://github.com/harfbuzz/harfbuzz) subset ported to Rust
 - [ttf-parser] - a TrueType/OpenType font parser
 - [fontdb] - a simple, in-memory font database with CSS-like queries
-- [roxmltree] + [xmlparser] - an XML parsing libraries
+- [roxmltree] - an XML parsing library
 - [simplecss] - a pretty decent CSS 2 parser and selector
 - [pico-args] - an absolutely minimal, but surprisingly popular command-line arguments parser
 
@@ -139,7 +139,6 @@ It's definitely the smallest option out there.
 [tiny-skia]: https://github.com/RazrFalcon/tiny-skia
 [ttf-parser]: https://github.com/RazrFalcon/ttf-parser
 [roxmltree]: https://github.com/RazrFalcon/roxmltree
-[xmlparser]: https://github.com/RazrFalcon/xmlparser
 [simplecss]: https://github.com/RazrFalcon/simplecss
 [fontdb]: https://github.com/RazrFalcon/fontdb
 [pico-args]: https://github.com/RazrFalcon/pico-args
