@@ -6,7 +6,7 @@ use fontdb::{Database, ID};
 use rustybuzz::ttf_parser;
 use rustybuzz::ttf_parser::GlyphId;
 use std::sync::Arc;
-use tiny_skia_path::{NonZeroRect, Transform};
+use tiny_skia_path::NonZeroRect;
 
 use crate::tree::BBox;
 use crate::{Group, Node, Path, ShapeRendering, Text, TextRendering};
@@ -61,7 +61,7 @@ pub(crate) fn flatten(text: &mut Text, fontdb: &fontdb::Database) -> Option<(Gro
                 span.paint_order,
                 rendering_mode,
                 Arc::new(p),
-                Transform::default(),
+                text.abs_transform,
             )
         }) {
             stroke_bbox = stroke_bbox.expand(path.stroke_bounding_box());
@@ -78,6 +78,7 @@ pub(crate) fn flatten(text: &mut Text, fontdb: &fontdb::Database) -> Option<(Gro
 
     let mut group = Group {
         id: text.id.clone(),
+        abs_transform: text.abs_transform,
         ..Group::empty()
     };
 
