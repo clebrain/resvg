@@ -104,11 +104,11 @@ pub(crate) fn convert(
     cache: &mut converter::Cache,
     parent: &mut Group,
 ) {
-    let pos_list = resolve_positions_list(text_node, state);
+    let mut pos_list = resolve_positions_list(text_node, state);
     let rotate_list = resolve_rotate_list(text_node);
     let writing_mode = convert_writing_mode(text_node);
 
-    let chunks = collect_text_chunks(text_node, &pos_list, state, cache);
+    let chunks = collect_text_chunks(text_node, &mut pos_list, state, cache);
 
     let rendering_mode: TextRendering = text_node
         .find_attribute(AId::TextRendering)
@@ -162,7 +162,7 @@ struct IterState {
 
 fn collect_text_chunks(
     text_node: SvgNode,
-    pos_list: &[CharacterPosition],
+    pos_list: &mut [CharacterPosition],
     state: &converter::State,
     cache: &mut converter::Cache,
 ) -> Vec<TextChunk> {
@@ -181,7 +181,7 @@ fn collect_text_chunks(
 
 fn collect_text_chunks_impl(
     parent: SvgNode,
-    pos_list: &[CharacterPosition],
+    pos_list: &mut [CharacterPosition],
     state: &converter::State,
     cache: &mut converter::Cache,
     iter_state: &mut IterState,
@@ -236,7 +236,14 @@ fn collect_text_chunks_impl(
             Some(n) => n,
             None => {
                 // Skip this span.
+                let pos = pos_list.get(iter_state.chars_count).copied();
                 iter_state.chars_count += child.text().chars().count();
+                if iter_state.chars_count < pos_list.len() {
+                    if let Some(pos) = pos {
+                        pos_list[iter_state.chars_count] = pos;
+                    }
+                }
+                // iter_state
                 continue;
             }
         };
